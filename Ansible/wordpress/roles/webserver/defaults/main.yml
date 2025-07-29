@@ -1,0 +1,3 @@
+---
+# defaults file for roles/webserver
+apache_document_root: /var/www/html

@@ -1,0 +1,53 @@
+---
+# tasks file for roles/common
+- name: update all packages
+  apt:
+    name: "*"
+    state: latest
+    update_cache: yes
+  
+- name: install common packages
+  apt:
+    pkg : "{{ common_packages}}"
+    state: present
+
+- name: Ensure local tmp directory exists for SSH keys
+  file:
+    path: "{{ playbook_dir }}/tmp"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+ 
+- name: generate local keypair
+  community.crypto.openssh_keypair:
+   path: "{{ playbook_dir }}/tmp/mern_id_rsa"
+  loop: "{{ users }}"
+  delegate_to: localhost
+  become: no
+
+- name : add users groups
+  ansible.builtin.group:
+    name: "{{ item.groups }}"
+    state: "{{ item.state }}"
+  loop: "{{ users }}"
+  
+- name: add users to groups
+  ansible.builtin.user:  
+    name: "{{ item.name }}"
+    groups: "{{ item.groups }}"
+    state: "{{ item.state }}"
+  loop: "{{ users }}"
+
+
+
+- name: add users ssh key
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ lookup('file', item.key + '.pub') }}" # Ensure the public key is used
+  loop: "{{ users }}"
+    
+
+
+  
+  

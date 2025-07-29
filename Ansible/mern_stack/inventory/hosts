@@ -1,0 +1,10 @@
+[database]
+dbserver01 ansible_host=ip
+
+[webserver]
+webserver01 ansible_host=ip
+
+[all:vars]
+ansible_connection=ssh
+ansible_user=root
+ansible_python_interpreter=/usr/bin/python3

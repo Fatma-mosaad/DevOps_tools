@@ -1,0 +1,32 @@
+- name: install common packages
+  hosts: all
+  become: yes
+  gather_facts: yes
+  roles:
+    - common
+
+- name: install web server packages
+  hosts: webserver
+  become: yes
+  gather_facts: yes
+  vars:
+    mern_app: "/var/www/myapp"
+    app_name: "my-react-app"
+    deploy_custom_pages: true
+    npm_packages:
+      - express
+      - create-react-app
+      - pm2
+    react_app:
+      title: "MERN Application"
+      description: "A full-stack MERN application"
+      message: "Welcome to the MERN stack application!"
+  roles:
+    - webserver
+
+- name: install and configure database server packages
+  hosts: database
+  become: yes
+  gather_facts: yes
+  roles:
+    - dbserver
