@@ -1,0 +1,7 @@
+---
+# vars file for roles/config
+users:
+  - name: fatma
+    full_name: "Fatma Mosad"
+    ssh_key: "ssh-rsa AAAAB3Nz...fatima_key"
+    is_sudo: true

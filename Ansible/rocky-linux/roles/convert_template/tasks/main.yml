@@ -1,0 +1,34 @@
+- name: Stop VM before converting
+  community.general.proxmox_kvm:
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_pass }}"
+    api_host: "{{ proxmox_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ vmid }}"
+    state: stopped
+    force: true
+    validate_certs: false
+  delegate_to: localhost
+
+- name: Wait for VM to stop
+  community.general.proxmox_kvm:
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_pass }}"
+    api_host: "{{ proxmox_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ vmid }}"
+    timeout: 60
+    state: stopped
+    validate_certs: false
+  delegate_to: localhost
+
+- name: Convert VM to template
+  community.general.proxmox_kvm:
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_pass }}"
+    api_host: "{{ proxmox_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ vmid }}"
+    state: template
+    validate_certs: false
+  delegate_to: localhost

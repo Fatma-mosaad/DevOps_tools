@@ -1,0 +1,17 @@
+proxmox_host: "102.209.248.19"
+proxmox_user: "root@pam"
+proxmox_pass: "Fatma2000"
+proxmox_node: "rocky-tm"
+
+rocky_version: 10.0
+iso_name: "Rocky-10.0-x86_64-dvd1.iso"
+iso_download_url: "https://download.rockylinux.org/pub/rocky/{{ rocky_version }}/isos/x86_64/{{ iso_name }}"
+iso_dest_path: "/var/lib/vz/template/iso/{{ iso_name }}"
+storage_iso: "local"
+storage_disk: "local-lvm"
+hostname: "rocky-tm"
+vmid: 104
+vm_user: "rockyuser"
+vm_pass: "rocky_password"
+vm_ip: "102.209.250.14"
+vm_gateway: "102.209.248.3"

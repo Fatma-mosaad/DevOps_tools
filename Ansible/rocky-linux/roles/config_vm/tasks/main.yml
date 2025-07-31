@@ -1,0 +1,54 @@
+
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ hostname }}"
+
+- name: Update all packages
+  ansible.builtin.package:
+    name: "*"
+    state: latest
+
+- name: Install basic tools
+  ansible.builtin.package:
+    name:
+      - sudo
+      - vim
+      - curl
+      - wget
+      
+    state: present
+
+- name: Create users and configure SSH keys
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    comment: "{{ item.full_name }}"
+    shell: /bin/bash
+    state: present
+    create_home: true
+  loop: "{{ users }}"
+
+- name: Add users to sudo group
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    groups: sudo
+    append: yes
+  loop: "{{ users }}"
+
+
+- name: Create .ssh directory
+  ansible.builtin.file:
+    path: "/home/{{ item.name }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: '0700'
+  loop: "{{ users }}"
+
+- name: Add authorized SSH key
+  ansible.builtin.copy:
+    dest: "/home/{{ item.name }}/.ssh/authorized_keys"
+    content: "{{ item.ssh_key }}"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: '0600'
+  loop: "{{ users }}"

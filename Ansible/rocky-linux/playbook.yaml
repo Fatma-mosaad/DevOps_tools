@@ -1,0 +1,13 @@
+---
+
+- name: Download Rocky Linux ISO on Proxmox
+  hosts: proxmox
+  vars:
+    all_vars: "{{ lookup('vars', 'group_vars/all') }}"
+  become: false
+  gather_facts: false
+  roles:
+    - create_vm
+    - config_vm
+    - convert_template
+

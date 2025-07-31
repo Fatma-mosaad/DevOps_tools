@@ -1,0 +1,3 @@
+---
+# vars file for roles/rocky
+cloud_image_dest: /var/lib/vz/template/qemu/rocky-cloud.qcow2

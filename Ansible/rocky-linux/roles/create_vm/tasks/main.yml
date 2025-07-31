@@ -1,0 +1,59 @@
+- name: Ping Proxmox host
+  ansible.builtin.ping:
+
+- name: Ensure ISO directory exists
+  ansible.builtin.file:
+    path: "{{ iso_dest_path | dirname }}"
+    state: directory
+    mode: '0755'
+
+- name: Download Rocky Linux ISO
+  ansible.builtin.get_url:
+    url: "{{ iso_download_url }}"
+    dest: "{{ iso_dest_path }}"
+    mode: '0644'
+    force: no
+
+- name: Create VM using ISO
+  community.general.proxmox_kvm:
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_pass }}"
+    api_host: "{{ proxmox_host }}"
+    validate_certs: false
+    timeout: 60
+    node: "{{ proxmox_node }}"
+    vmid: "{{ vmid }}"
+    name: "{{ hostname }}"
+    cores: 2
+    memory: 2048
+    kvm: false             
+    agent: true  
+    ide:
+      ide2: "{{ storage_iso }}:iso/{{ iso_name }},media=cdrom"
+    sata:
+      sata0: "{{ storage_disk }}:32"
+    net:
+      net0: virtio,bridge=vmbr0
+      ipconfig0: "ip={{ vm_ip }}/24,gw={{ vm_gateway }}"
+    ostype: l26
+    boot: cd
+    state: present
+  delegate_to: localhost
+
+- name: Check if VM config exists
+  ansible.builtin.stat:
+    path: "/etc/pve/nodes/{{ proxmox_node }}/qemu-server/{{ vmid }}.conf"
+  register: vm_config
+  delegate_to: localhost
+
+
+- name: Start the VM
+  community.general.proxmox_kvm:
+    api_user: "{{ proxmox_user }}"
+    api_password: "{{ proxmox_pass }}"
+    api_host: "{{ proxmox_host }}"
+    validate_certs: false
+    node: "{{ proxmox_node }}"
+    vmid: "{{ vmid }}"
+    state: started
+  delegate_to: localhost
