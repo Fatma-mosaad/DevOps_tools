@@ -1,6 +1,6 @@
-proxmox_host: "102.209.248.19"
+proxmox_host: "ip"
 proxmox_user: "root@pam"
-proxmox_pass: "Fatma2000"
+proxmox_pass: "pass"
 proxmox_node: "rocky-tm"
 
 rocky_version: 10.0
@@ -13,5 +13,5 @@ hostname: "rocky-tm"
 vmid: 104
 vm_user: "rockyuser"
 vm_pass: "rocky_password"
-vm_ip: "102.209.250.14"
-vm_gateway: "102.209.248.3"
+vm_ip: "ip"
+vm_gateway: "getway"
