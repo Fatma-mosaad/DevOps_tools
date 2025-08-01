@@ -1,5 +1,3 @@
 [proxmox]
-ip  ansible_user=root ansible_ssh_pass=your_password ansible_connection=ssh
+102.209.248.19 ansible_user=root ansible_ssh_pass=your_password ansible_connection=ssh
 
-[rocky]
-rockyvm ansible_host=ip ansible_user=root ansible_ssh_pass=your_password ansible_connection=ssh

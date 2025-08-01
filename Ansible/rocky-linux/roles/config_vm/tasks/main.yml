@@ -1,42 +1,94 @@
 
-- name: Set hostname
-  ansible.builtin.hostname:
-    name: "{{ hostname }}"
 
-- name: Update all packages
-  ansible.builtin.package:
-    name: "*"
-    state: latest
+- name: Mount Rocky Linux DVD
+  mount:
+    src: /dev/sr0
+    path: /mnt
+    fstype: iso9660
+    opts: ro
+    state: mounted
+
+
+- name: Try installing dnf manually if rpm exists
+  shell: |
+    if command -v rpm >/dev/null 2>&1; then
+      rpm -ivh /mnt/Packages/{libcomps,libdnf,librepo,libsolv,dnf,python3-dnf,python3-libdnf}-*.rpm --nodeps
+    fi
+  
+  ignore_errors: true
+
+- name: Configure local DVD repo
+  copy:
+    dest: /etc/yum.repos.d/dvd.repo
+    content: |
+      [dvd]
+      name=Rocky DVD
+      baseurl=file:///mnt/
+      enabled=1
+      gpgcheck=0
+
+
 
 - name: Install basic tools
-  ansible.builtin.package:
+  package:
     name:
-      - sudo
       - vim
       - curl
       - wget
-      
+      - tar
+      - git
+    state: present
+  ignore_errors: true
+
+
+- name: Ensure NetworkManager config directory exists
+  file:
+    path: /etc/NetworkManager/system-connections
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Configure DHCP on eth0 using NetworkManager keyfile
+  copy:
+    dest: "/etc/NetworkManager/system-connections/{{ interface_name }}.nmconnection"
+    content: |
+      [connection]
+      id={{ interface_name }}
+      type=ethernet
+      interface-name={{ interface_name }}
+      [ipv4]
+      method=auto
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Restart NetworkManager if available
+  service:
+    name: NetworkManager
+    state: restarted
+    enabled: yes
+  ignore_errors: true
+
+- name: Ensure wheel group exists
+  group:
+    name: wheel
     state: present
 
-- name: Create users and configure SSH keys
-  ansible.builtin.user:
-    name: "{{ item.name }}"
-    comment: "{{ item.full_name }}"
-    shell: /bin/bash
-    state: present
-    create_home: true
-  loop: "{{ users }}"
-
-- name: Add users to sudo group
-  ansible.builtin.user:
-    name: "{{ item.name }}"
-    groups: sudo
-    append: yes
-  loop: "{{ users }}"
-
+- name: Create users and configure SSH access
+  block:
+    - name: Create users
+      user:
+        name: "{{ item.name }}"
+        comment: "{{ item.full_name }}"
+        shell: /bin/bash
+        groups: wheel
+        append: yes
+        state: present
+      loop: "{{ users }}"
 
 - name: Create .ssh directory
-  ansible.builtin.file:
+  file:
     path: "/home/{{ item.name }}/.ssh"
     state: directory
     owner: "{{ item.name }}"
@@ -45,7 +97,7 @@
   loop: "{{ users }}"
 
 - name: Add authorized SSH key
-  ansible.builtin.copy:
+  copy:
     dest: "/home/{{ item.name }}/.ssh/authorized_keys"
     content: "{{ item.ssh_key }}"
     owner: "{{ item.name }}"
