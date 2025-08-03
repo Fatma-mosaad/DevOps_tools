@@ -25,6 +25,7 @@ This project automates the provisioning of a Rocky Linux virtual machine on a Pr
 - Provisions a VM on Proxmox with custom configuration
 - Configures network and basic system utilities from Rocky Linux DVD
 - Creates users and injects SSH public keys
+- Enables passwordless sudo access for wheel group
 - Prepares VM for SSH and network access
 - Stops and converts VM into a reusable Proxmox template
 
@@ -41,27 +42,19 @@ This project automates the provisioning of a Rocky Linux virtual machine on a Pr
 
 ### config_vm
 
-This role configures the Rocky Linux VM after creation:
+- Mount Rocky Linux DVD 
 
-🔹 Mounts Rocky Linux DVD:
+- Manually installs `dnf`
 
-🔹 Installs `dnf` manually (if needed):
+- Installs base system tools
 
-🔹 Sets up local YUM repo:
+- Creates users and sets SSH access 
+ 
 
-🔹 Installs basic tools:
+- Enables passwordless sudo
 
-🔹 Reloads systemd:
-
-🔹 Configures networking:
-- Ensures `/etc/NetworkManager/system-connections` exists
-- Adds a keyfile config for `eth0` with DHCP
-- Restarts NetworkManager if available
-
-🔹 Creates users with SSH access:
-
-This prepares the system to be accessed remotely and used as a base template.
-
+- Configures networking
+  
 ### convert_template
 
 - Shuts down the VM (forcefully if needed)

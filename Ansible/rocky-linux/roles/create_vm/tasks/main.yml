@@ -30,11 +30,11 @@
     kvm: false
     agent: true
     ide:
-      ide2: "{{ storage_iso }}:iso/{{ iso_name }},media=cdrom"
+      ide2: "local:iso/Rocky-9.6-x86_64-minimal.iso,media=cdrom"
     sata:
       sata0: "{{ storage_disk }}:32"
     net:
-      net0: virtio,bridge=vmbr0
+      net0: virtio,bridge=vmbr1
     ostype: l26
     boot: cd
     state: present

@@ -6,4 +6,9 @@ users:
     ssh_key: "ssh-rsa AAAAB3Nz...fatima_key"
     is_sudo: true
     
-interface_name: eth0 
+interface_name: ens18 
+vma_ip: "ip_from_vpcrange"
+vma_gateway: "getway_for_proxmox"
+vma_netmask: 24
+vma_dns: 8.8.8.8
+reboot_after_ip_change: true 
