@@ -1,0 +1,42 @@
+- name : create mongodb data directory
+  file: "{{ mongodb_data_dir }}"
+  state: directory
+  owner: mongodb
+  roup: mongodb
+  mode: '0755'
+
+- name : templet mongodb configuration file
+  template:
+    src: mongod.conf.j2
+    dest: "{{ mongodb_config_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart mongodb
+- name : check if .mongoshrc.js exists    
+  stat:  
+   path: ~/.mongoshrc.js
+  register: mongoshrc_file  #data of file existence is stored in this variable
+- name : create mongodb root user
+  mango_user:
+    database: admin
+    name: "{{ mongo_root_user }}"
+    password: "{{ mongo_root_password }}"
+    roles: root
+  when: not mongoshrc_file.stat.exists
+
+- name : create .mongoshrc.js file
+  template:
+    src: mongoshrc.js.j2
+    dest: ~/.mongoshrc.js
+    mode: '0644'
+  notify: restart mongodb
+
+- name : enabled authentication in mongodb configuration
+  lineinfile: 
+   path: /etc/mongod.conf
+   line: 'security:\n  authorization: enabled'   
+   insertafter: "^#security:"   
+   state: present
+   backup: yes
+  notify: restart mongodb

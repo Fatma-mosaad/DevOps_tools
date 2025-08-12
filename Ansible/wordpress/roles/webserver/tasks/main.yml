@@ -1,0 +1,58 @@
+---
+# tasks file for roles/webserver
+
+- name: Install Apache2 and PHP packages
+  become: true
+  apt:
+    name: "{{ item }}"
+    state: present
+    update_cache: true
+  loop:
+    - apache2
+    - php  
+    - libapache2-mod-php
+
+- name: Deploy apache2 configuration file
+  become: true
+  template:
+    src: apache2.conf.j2
+    dest: /etc/apache2/sites-available/000-default.conf
+  notify: restart apache
+
+- name: Enable Apache site
+  become: true
+  command: a2ensite 000-default.conf
+  notify: restart apache
+
+- name: Ensure Apache is enabled and started
+  become: true
+  service:
+    name: apache2
+    state: started
+    enabled: true
+
+- name: Deploy phpinfo file
+  become: true
+  copy:
+    src: phpinfo.php
+    dest: "{{ apache_document_root | default('/var/www/html') }}/phpinfo.php"
+  notify: restart apache
+
+- name : download wordpress
+  get_url:
+    url : https://wordpress.org/latest.tar.gz
+    dest: /tmp/latest.tar.gz
+
+- name : extract wordpress
+  unarchive : 
+    src: /tmp/latest.tar.gz
+    dest: "{{ apache_document_root | default ('/var/www/html') }}"
+    remote_src : yes
+
+
+- name : copy wp-config.php template
+  template:
+   src: wp-config.php
+   dest: "{{apache_document_root | default ('/var/www/html')}}/wordpress"
+    
+          

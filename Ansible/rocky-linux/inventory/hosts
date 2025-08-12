@@ -1,0 +1,6 @@
+[proxmox]
+102.209.248.19 ansible_user=root ansible_ssh_pass=your_password ansible_connection=ssh
+
+[rocky]
+
+10.10.2.6 ansible_user=root ansible_ssh_pass=12345 ansible_connection=ssh

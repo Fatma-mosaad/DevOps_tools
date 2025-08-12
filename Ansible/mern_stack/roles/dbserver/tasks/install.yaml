@@ -1,0 +1,41 @@
+- name : install pip
+  apt:
+    name: python3-pip
+    state: present
+
+- name: allow apt to install packages globally
+  file:
+  path: /usr/local/lib/python3.8/dist-packages/EXTERNALLY-MANAGED
+  state: absent
+- name: install pymongo
+  pip:
+    name: "{{ item }}"
+    state: latest 
+    executable: pip3
+  loop:
+    - pymongo
+    - configparser     
+
+- name : add mongodb repo 
+  deb22_repository:
+    name : mongodb
+    type: deb  
+    uris: "http://repo.mongodb.org/apt/ubuntu"
+    component: multiverse"  
+    architecture: [ amd64, arm64 ]
+    suites: "{{ ansible_distribution_release }}/mongodb-org/{{ mongodb_version }}"
+    signed_by: "http://www.mongodb.org/static/pgp/server-{{ mongodb_version }}.asc"
+
+- name : update apt cache
+  apt:
+    update_cache: yes
+- name : install mongodb packages
+  apt:
+    name: mongodb-org
+    state: present
+    update_cache: yes        
+- name: ensure mongodb service is enabled and started
+  service:
+    name: mongod
+    state: started
+    enabled: true   

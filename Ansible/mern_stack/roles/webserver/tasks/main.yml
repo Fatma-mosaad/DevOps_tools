@@ -1,0 +1,69 @@
+---
+# tasks file for roles/webserver
+
+- name: Remove default Node.js if installed
+  apt:
+    name: nodejs
+    state: absent
+  ignore_errors: yes
+
+- name: Add NodeSource Node.js 18 repository
+  shell: curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+  args:
+    executable: /bin/bash
+
+- name: Install Node.js 18 and npm
+  apt:
+    name: nodejs
+    state: present
+    update_cache: yes
+
+- name: create app directory
+  file:
+    path: "{{ mern_app }}"
+    state: directory
+    owner: "{{ users[0].name }}"
+    group: "{{ users[0].groups }}"
+    mode: '0755'
+
+- name: install npm packages
+  npm:
+    name: "{{ item }}"
+    global: true
+  loop: "{{ npm_packages }}"
+
+- name: initialize nodejs app  # React virtual app
+  command: "npx create-react-app {{ app_name }}"
+  args:
+    chdir: "{{ mern_app }}"
+    creates: "{{ mern_app }}/{{ app_name }}"
+  when: app_name is defined
+
+- name: configure react app to listen on 0.0.0.0
+  ansible.builtin.lineinfile:
+    path: "{{ mern_app }}/{{ app_name }}/.env"
+    line: "HOST=0.0.0.0"
+    create: yes
+
+- name: deploy custom app.css
+  copy:
+    src: app.css
+    dest: "{{ mern_app }}/{{ app_name }}/src/app.css"
+    mode: '0644'
+  when: deploy_custom_pages | bool
+
+- name: deploy custom app.js
+  template:
+    src: app.js.j2
+    dest: "{{ mern_app }}/{{ app_name }}/src/app.js"
+    mode: '0644'
+    variable_start_string: "{[%"
+    variable_end_string: "%]}"
+  when: deploy_custom_pages | bool
+
+- name: start the react app using pm2
+  command: "pm2 start npm -- start --watch"
+  args:
+    chdir: "{{ mern_app }}/{{ app_name }}"
+    creates: "{{ mern_app }}/{{ app_name }}/node_modules/.bin/pm2"
+  when: react_app is defined and react_app | length > 0

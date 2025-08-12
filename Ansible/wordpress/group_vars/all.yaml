@@ -1,0 +1,11 @@
+# group_vars/all.yml
+users:
+  - name: ansibleadmin
+    state: present
+    groups: sudo
+    key: "{{ playbook_dir }}/tmp/mern_id_rsa"
+    
+wp_db_name: wordpress
+wp_db_user: wp_user
+wp_db_password: wp_pass123
+wp_db_host: "{{ hostvars['dbserver'].ansible_host }}"

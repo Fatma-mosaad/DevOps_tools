@@ -1,0 +1,6 @@
+
+blog_dir : /var/www/boots-blog
+blog_name : "bootstrap"
+blog_page :
+     - index.html
+     - about.html

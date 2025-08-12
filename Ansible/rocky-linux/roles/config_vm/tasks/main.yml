@@ -1,0 +1,74 @@
+- name: Mount Rocky Linux DVD
+  mount:
+    src: /dev/sr0
+    path: /mnt
+    fstype: iso9660
+    opts: ro
+    state: mounted
+
+- name: Try installing dnf manually if rpm exists
+  shell: |
+    if command -v rpm >/dev/null 2>&1; then
+      rpm -ivh /mnt/Packages/{libcomps,libdnf,librepo,libsolv,dnf,python3-dnf,python3-libdnf}-*.rpm --nodeps
+    fi
+  ignore_errors: true
+
+- name: Install basic tools
+  package:
+    name:
+      - vim
+      - curl
+      - wget
+      - tar
+      - git
+    state: present
+  ignore_errors: true
+
+- name: Ensure wheel group exists
+  group:
+    name: wheel
+    state: present
+
+- name: Create users
+  user:
+    name: "{{ item.name }}"
+    comment: "{{ item.full_name }}"
+    shell: /bin/bash
+    groups: wheel
+    append: yes
+    state: present
+  loop: "{{ users }}"
+
+- name: Create .ssh directory
+  file:
+    path: "/home/{{ item.name }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: '0700'
+  loop: "{{ users }}"
+
+- name: Add authorized SSH key
+  copy:
+    dest: "/home/{{ item.name }}/.ssh/authorized_keys"
+    content: "{{ item.ssh_key }}"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: '0600'
+  loop: "{{ users }}"
+
+- name: Allow 'wheel' group to have passwordless sudo
+  copy:
+    dest: /etc/sudoers.d/wheel-nopasswd
+    content: '%wheel ALL=(ALL) NOPASSWD: ALL'
+    owner: root
+    group: root
+    mode: '0440'
+
+- name: Ensure NetworkManager config directory exists
+  file:
+    path: /etc/NetworkManager/system-connections
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'

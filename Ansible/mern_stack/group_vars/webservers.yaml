@@ -1,0 +1,13 @@
+mern_app: "/var/www/myapp"
+app_name: "my-react-app"
+deploy_custom_pages: true
+
+npm_packages:
+  - express
+  - create-react-app
+  - pm2
+
+react_app:
+  title: "MERN Application"
+  description: "A full-stack MERN application"
+  message: "Welcome to the MERN stack application!"

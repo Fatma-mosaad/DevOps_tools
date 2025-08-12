@@ -1,0 +1,5 @@
+users :
+   - name : mern
+     groups: mern
+     state: present
+     ssh_key_file: "{{ playbook_dir }}/tmp/mern_id_rsa"

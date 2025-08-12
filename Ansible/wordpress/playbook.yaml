@@ -1,0 +1,17 @@
+- name: install common packages
+  hosts: all
+  become: true
+  roles:
+    - common
+
+- name: install webserver packages
+  hosts: webserver
+  become: true
+  roles:
+    - webserver
+
+- name: install dbserver packages
+  hosts: dbserver
+  become: true
+  roles:
+    - dbserver

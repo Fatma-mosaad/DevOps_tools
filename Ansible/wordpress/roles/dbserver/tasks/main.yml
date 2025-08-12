@@ -1,0 +1,61 @@
+---
+# tasks file for roles/dbserver
+- name: ensure required packages are installed
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - python3-mysqldb
+    - python3-mysql.connector
+
+- name : insttall mysql server
+  apt:
+    name: mysql-server
+    state: present
+  notify: start mysql
+
+- name : check if .my.cnf exists
+  stat: 
+   path: ~/.my.cnf
+  register: my_cnf
+
+- name : set mysql root password
+  shell : |
+    mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '{{ mysql_root_password }}';FLUSH PRIVILEGES;"
+  when: my_cnf.stat.exists == False
+
+- name : Deploy mysql .my.cnf file
+  template:
+    src: my_cnf.j2
+    dest: ~/.my.cnf
+    mode: '0600'
+  when: my_cnf.stat.exists == False
+
+
+- name : allow remote connections in mysql
+  lineinfile: 
+    path : /etc/mysql/mysql.conf.d/mysqld.cnf
+    regexp: '^bind-address'
+    line: 'bind-address = 0.0.0.0 '
+  notify:
+    - restart mysql
+
+
+########### wordpress database tasks ###########
+- name : create wordpress database
+  mysql_db:
+    name: wordpress
+    state: present
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+
+- name : create wordpress user
+  mysql_user:
+    name: wordpress_user
+    password: "{{ mysql_wordpress_user_password }}"
+    priv: 'wordpress.*:ALL'
+    state: present
+
+
+
+ 

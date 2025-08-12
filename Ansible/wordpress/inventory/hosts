@@ -1,0 +1,10 @@
+[all:vars]
+ansible_connection=ssh
+ansible_user=ansibleadmin
+ansible_private_key_file=~/.ssh/id
+
+[webserver]
+webserver01 ansible_host=ip
+
+[dbserver]
+dbserver01 ansible_host=ip
