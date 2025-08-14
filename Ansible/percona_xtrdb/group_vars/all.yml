@@ -1,0 +1,4 @@
+
+  cluster_name: my_pxc_cluster
+  wsrep_cluster_nodes: gcomm://10.10.0.11,10.10.0.8,10.10.0.7
+  

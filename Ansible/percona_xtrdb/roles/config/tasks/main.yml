@@ -1,0 +1,19 @@
+---
+# tasks file for roles/config
+
+
+- name: Backup existing mysqld.cnf
+  copy:
+    src: /etc/mysql/mysql.conf.d/mysqld.cnf
+    dest: /etc/mysql/mysql.conf.d/mysqld.cnf.bak
+    remote_src: yes
+  ignore_errors: yes
+  
+
+
+- name: Deploy custom mysqld.cnf for PXC
+  template:
+    src: mysqld.cnf.j2
+    dest: /etc/mysql/mysql.conf.d/mysqld.cnf
+
+

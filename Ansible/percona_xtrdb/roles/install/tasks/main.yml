@@ -1,0 +1,64 @@
+---
+# tasks file for roles/install
+
+- name: Update packages
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install required dependencies
+  ansible.builtin.apt:
+    name:
+      - wget
+      - gnupg2
+      - lsb-release
+      - curl
+    state: present
+
+- name: Download Percona APT package
+  ansible.builtin.get_url:
+    url: "https://repo.percona.com/apt/percona-release_latest.generic_all.deb"
+    dest: /tmp/percona-release_latest.deb
+
+- name: Install Percona APT package
+  ansible.builtin.apt:
+    deb: /tmp/percona-release_latest.deb
+
+
+- name: Update APT cache again
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Setup Percona repository for PXC 8.0
+  command: percona-release setup pxc80
+  args:
+    creates: /etc/apt/sources.list.d/percona-release.list
+
+
+
+- name: Install Percona XtraDB Cluster
+  ansible.builtin.apt:
+    name: percona-xtradb-cluster
+    state: present
+
+- name: Ensure UFW is installed
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Allow MySQL ports through UFW
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+  loop:
+    - { port: 3306, proto: "tcp" }
+    - { port: 4444, proto: "tcp" }
+    - { port: 4567, proto: "tcp" }
+    - { port: 4567, proto: "udp" }
+    - { port: 4568, proto: "tcp" }   
+    - { port: 9200, proto: "tcp" }
+
+
+- name: Enable UFW
+  ansible.builtin.ufw:
+    state: enabled

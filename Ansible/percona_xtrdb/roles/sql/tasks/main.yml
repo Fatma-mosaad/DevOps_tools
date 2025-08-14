@@ -1,0 +1,32 @@
+---
+
+# # Phase 1: Bootstrap node
+
+- name: Stop MySQL before bootstrap (first node only)
+  systemd:
+    name: mysql
+    state: stopped
+  when: inventory_hostname == groups['pxc'][0]
+
+- name: Bootstrap first Percona XtraDB Cluster node
+  shell: |
+    systemctl set-environment PXC_BOOTSTRAP=1
+    systemctl start mysql
+    systemctl unset-environment PXC_BOOTSTRAP
+  when: inventory_hostname == groups['pxc'][0]
+
+- name: Wait for MySQL to start on first node (socket)
+  wait_for:
+    path: /var/run/mysqld/mysqld.sock
+    state: present
+    timeout: 60
+  when: inventory_hostname == groups['pxc'][0]
+
+
+- name: Restart MySQL on all nodes
+  systemd:
+    name: mysql
+    state: restarted
+    enabled: yes
+
+  when: inventory_hostname != groups['pxc'][0]

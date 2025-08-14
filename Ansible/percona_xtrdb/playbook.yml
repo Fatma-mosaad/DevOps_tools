@@ -1,0 +1,9 @@
+
+---
+- name: Install Percona XtraDB cluster
+  hosts: pxc
+  become: yes
+  roles:
+    - install
+    - config
+    - sql

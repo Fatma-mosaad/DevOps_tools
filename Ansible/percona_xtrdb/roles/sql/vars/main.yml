@@ -1,0 +1,6 @@
+---
+# vars file for roles/node_1
+
+  sst_user: "aa"
+  sst_password: 1234
+  mysql_root_password: 1234

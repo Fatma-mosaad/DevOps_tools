@@ -1,0 +1,64 @@
+[client]
+socket=/var/run/mysqld/mysqld.sock
+
+[mysqld]
+server-id={{ server_id }}
+datadir=/var/lib/mysql
+socket=/var/run/mysql[client]
+socket=/var/run/mysqld/mysqld.sock
+
+[mysqld]
+server-id={{ server_id }}
+datadir=/var/lib/mysql
+socket=/var/run/mysqld/mysqld.sock
+log-error=/var/log/mysql/error.log
+pid-file=/var/run/mysqld/mysqld.pid
+
+pxc-encrypt-cluster-traffic=OFF
+binlog_expire_logs_seconds=604800
+
+######## wsrep ###############
+wsrep_on=ON
+wsrep_provider=/usr/lib/galera4/libgalera_smm.so
+wsrep_cluster_name={{ cluster_name }}
+wsrep_cluster_address={{ wsrep_cluster_nodes }}
+wsrep_node_address={{ wsrep_node_address }}
+wsrep_node_name={{ wsrep_node_name }}
+wsrep_sst_method=xtrabackup-v2
+
+binlog_format=ROW
+wsrep_slave_threads=8
+wsrep_log_conflicts
+innodb_autoinc_lock_mode=2
+pxc_strict_mode=ENFORCING
+default_storage_engine=InnoDB
+innodb_flush_log_at_trx_commit=0
+pxc-encrypt-cluster-traffic=OFF
+symbolic-links=0
+default_authentication_plugin=mysql_native_password
+d/mysqld.sock
+log-error=/var/log/mysql/error.log
+pid-file=/var/run/mysqld/mysqld.pid
+
+pxc-encrypt-cluster-traffic=OFF
+binlog_expire_logs_seconds=604800
+
+######## wsrep ###############
+wsrep_on=ON
+wsrep_provider=/usr/lib/galera4/libgalera_smm.so
+wsrep_cluster_name={{ cluster_name }}
+wsrep_cluster_address={{ wsrep_cluster_nodes }}
+wsrep_node_address={{ wsrep_node_address }}
+wsrep_node_name={{ wsrep_node_name }}
+wsrep_sst_method=xtrabackup-v2
+
+binlog_format=ROW
+wsrep_slave_threads=8
+wsrep_log_conflicts
+innodb_autoinc_lock_mode=2
+pxc_strict_mode=ENFORCING
+default_storage_engine=InnoDB
+innodb_flush_log_at_trx_commit=0
+pxc-encrypt-cluster-traffic=OFF
+symbolic-links=0
+default_authentication_plugin=mysql_native_password
