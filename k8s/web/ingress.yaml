@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fast
+spec:
+  
+  rules:
+  - host: fast.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+         service:
+            name: fast
+            port:
+              number: 8000

@@ -1,0 +1,45 @@
+apiversion: apps/v1
+kind: statefulset
+metadata:
+  name: mysql
+
+spec:
+  replicas: 1
+  serviceName: "mysql"
+  selector:
+    matchLabels:
+      app: mysql
+    template:
+      metadata:
+        labels:
+          app: mysql
+      spec:
+        containers:
+        - name: mysql
+          image: mysql:5.7
+          imagePullPolicy: IfNotPresent
+          ports:
+          - containerPort: 3306
+            name: mysql
+          env:
+          - name: MYSQL_ROOT_PASSWORD
+            value: password
+          - name: MYSQL_DATABASE
+            value: mydatabase
+          volumeMounts:
+          - name: mysql-persistent-storage
+            mountPath: /var/lib/mysql  
+
+          volumes:
+          - name: mysql-persistent-storage
+            configMap:
+              name: config-sql
+          volumeCliaimTemplates:
+          - metadata:
+              name: mysql-persistent-storage
+            spec:
+              accessModes: [ "ReadWriteOnce" ]
+              storseClassName: "standard"
+              resources:
+                requests:
+                  storage: 3Gi
