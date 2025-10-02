@@ -2,170 +2,173 @@ pipeline {
     agent any
 
     environment {
-        KUBECONFIG = "${HOME}/.kube/config"
-        CLUSTER_NAME    = "ci-test"
-        VAULT_NAMESPACE = "vault"
-        VAULT_REVIEWER_SA = "vault-auth"   // used by Vault to review tokens
-        APP_SA_NAME     = "myapp-sa"       // used by the application pod
-        POLICY_NAME     = "myapp"
+        KUBECONFIG        = "${HOME}/.kube/config"
+        CLUSTER_NAME      = "ci-test"
+        VAULT_NAMESPACE   = "vault"
+        VAULT_REVIEWER_SA = "vault-auth"
+        APP_SA_NAME       = "myapp-sa"
+        POLICY_NAME       = "myapp"
+    }
+
+    options {
+        timestamps()
     }
 
     stages {
-
-        stage('Create KinD Cluster') {
+        stage('Check & Install Required Tools') {
             steps {
-                script {
-                    def exists = sh(
-                        script: "kind get clusters | grep -q \"^${CLUSTER_NAME}\$\" && echo true || echo false",
-                        returnStdout: true
-                    ).trim()
-        
-                    if (exists == "true") {
-                        echo "==> Cluster ${CLUSTER_NAME} already exists, skipping ✅"
-                    } else {
-                        sh """
-                        echo "==> Creating KinD cluster: ${CLUSTER_NAME}"
-                        kind create cluster --name ${CLUSTER_NAME} --wait 120s
-        
-                        echo "==> Exporting kubeconfig for cluster: ${CLUSTER_NAME}"
-                        mkdir -p ~/.kube
-                        kind get kubeconfig --name ${CLUSTER_NAME} > ~/.kube/config
-                        chmod 600 ~/.kube/config
-        
-                        echo "==> Current kubectl context:"
-                        kubectl config current-context
-                        """
-                        echo "==> Cluster ${CLUSTER_NAME} created successfully ✅"
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        sh '''
+                        set -e
+
+                        check_install() {
+                          TOOL=$1
+                          INSTALL_CMD=$2
+                          if ! command -v "$TOOL" >/dev/null 2>&1; then
+                            echo "==> $TOOL not found ❌ Installing..."
+                            eval "$INSTALL_CMD"
+                            if command -v "$TOOL" >/dev/null 2>&1; then
+                              echo "==> $TOOL installed successfully ✅"
+                            else
+                              echo "==> Failed to install $TOOL ❌"
+                              exit 1
+                            fi
+                          else
+                            echo "==> $TOOL already installed ✅"
+                          fi
+                        }
+
+                        # Install tools if missing
+                        check_install kind "curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind"
+                        check_install kubectl "curl -LO https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl && chmod +x kubectl && sudo mv kubectl /usr/local/bin/"
+                        check_install helm "curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
+                        check_install jq "sudo apt-get update && sudo apt-get install -y jq || sudo yum install -y jq"
+                        check_install curl "sudo apt-get update && sudo apt-get install -y curl || sudo yum install -y curl"
+                        check_install base64 "sudo apt-get update && sudo apt-get install -y coreutils || sudo yum install -y coreutils"
+                        '''
                     }
                 }
             }
         }
 
-
-        stage('Check Cluster Nodes') {
+        stage('Create KinD Cluster') {
             steps {
-                sh '''
-                echo "==> Checking if cluster nodes are Ready..."
-                for i in {1..10}; do
-                  NOT_READY=$(kubectl get nodes --no-headers 2>/dev/null | awk '$2 != "Ready" {print $1}' || true)
-                  if [ -z "$NOT_READY" ]; then
-                    echo "==> All nodes are Ready ✅"
-                    break
-                  fi
-                  echo "==> Nodes not Ready yet, retrying in 10s... (attempt $i/10)"
-                  sleep 10
-                done
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        def exists = sh(
+                            script: "kind get clusters | grep -q \"^${CLUSTER_NAME}\$\" && echo true || echo false",
+                            returnStdout: true
+                        ).trim()
 
-                echo "==> Cluster Nodes:"
-                kubectl get nodes -o wide
-                echo "==> Exporting kubeconfig for cluster: ${CLUSTER_NAME}"
-                mkdir -p ~/.kube
-                kind get kubeconfig --name ${CLUSTER_NAME} > ~/.kube/config
-                chmod 600 ~/.kube/config
-                echo "==> Current kubectl context:"
-                kubectl config current-context
-                '''
+                        if (exists == "true") {
+                            echo "==> Cluster ${CLUSTER_NAME} already exists, skipping ✅"
+                        } else {
+                            sh """
+                            kind create cluster --name ${CLUSTER_NAME} --wait 120s
+                            mkdir -p ~/.kube
+                            kind get kubeconfig --name ${CLUSTER_NAME} > ~/.kube/config
+                            chmod 600 ~/.kube/config
+                            """
+                            echo "==> Cluster ${CLUSTER_NAME} created successfully ✅"
+                        }
+                    }
+                }
             }
         }
 
-        stage('Install Helm') {
+        stage('Check Cluster Nodes') {
             steps {
-                sh '''
-                if ! command -v helm >/dev/null 2>&1; then
-                  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-                fi
-                helm version
-                echo "==> Helm installed successfully ✅"
-                '''
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        retry(10) {
+                            sh '''
+                            echo "==> Checking nodes..."
+                            NOT_READY=$(kubectl get nodes --no-headers | awk '$2 != "Ready" {print $1}')
+                            if [ -n "$NOT_READY" ]; then
+                                echo "Nodes not Ready yet ❌"
+                                exit 1
+                            fi
+                            echo "Nodes are Ready ✅"
+                            '''
+                        }
+                    }
+                }
             }
         }
 
         stage('Install Vault (HA Mode)') {
             steps {
-                script {
-                    def installed = sh(
-                        script: "kubectl get pods -n ${VAULT_NAMESPACE} -l app.kubernetes.io/name=vault --no-headers 2>/dev/null | wc -l",
-                        returnStdout: true
-                    ).trim()
-
-                    if (installed.toInteger() > 0) {
-                        echo "==> Vault already installed in namespace ${VAULT_NAMESPACE}, skipping ✅"
-                    } else {
-                        sh """
-                        helm repo add hashicorp https://helm.releases.hashicorp.com
-                        helm repo update
-                        helm upgrade --install vault hashicorp/vault \
-                          --namespace vault --create-namespace \
-                          --set server.ha.enabled=true \
-                          --set server.standalone.enabled=false \
-                          --set server.dataStorage.enabled=true \
-                          --set server.dataStorage.size=6Gi \
-                          --set server.ha.raft.enabled=true \
-                          --set server.ha.replicas=1 \
-                          --set ui.enabled=true \
-                          --set injector.enabled=true
-
-
-                        """
-                        echo "==> Vault installed successfully in HA mode ✅"
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        retry(3) {
+                            sh '''
+                            if helm status vault -n vault >/dev/null 2>&1; then
+                                echo "Vault already installed ✅"
+                                exit 0
+                            fi
+                            helm repo add hashicorp https://helm.releases.hashicorp.com
+                            helm repo update
+                            helm install vault hashicorp/vault --namespace vault --create-namespace \
+                              --set server.ha.enabled=true \
+                              --set server.standalone.enabled=false \
+                              --set server.dataStorage.enabled=true \
+                              --set server.dataStorage.size=6Gi \
+                              --set server.ha.raft.enabled=true \
+                              --set server.ha.replicas=1 \
+                              --set ui.enabled=true \
+                              --set injector.enabled=true
+                            '''
+                            echo "==> Vault installed successfully in HA mode ✅"
+                        }
                     }
                 }
             }
         }
-        stage('Wait for Vault to be Ready') {
+
+        stage('Wait Vault to be Ready') {
             steps {
-                sh """
-                echo "==> Waiting for Vault container inside vault-0 to be ready..."
-                for i in {1..30}; do
-                  STATUS=\$(kubectl get pod vault-0 -n ${VAULT_NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
-                  READY=\$(kubectl get pod vault-0 -n ${VAULT_NAMESPACE} -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
-
-                  if [ "\$STATUS" = "Running" ] && [ "\$READY" = "true" ]; then
-                    echo "==> Vault pod vault-0 is Running and Ready ✅"
-                    break
-                  fi
-
-                  echo "==> Vault pod not ready yet (STATUS=\$STATUS, READY=\$READY), retrying in 10s..."
-                  sleep 10
-                done
-
-                echo "==> Final pod status:"
-                kubectl get pods -n ${VAULT_NAMESPACE} -o wide
-                """
-            }
-        }
-
-                
-
-
-        stage('Install jq') {
-            steps {
-                sh '''
-                if ! command -v jq >/dev/null 2>&1; then
-                  apt-get update && apt-get install -y jq
-                fi
-                echo "==> jq installed successfully ✅"
-                '''
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        retry(60) {
+                            sh '''
+                            STATUS=$(kubectl get pod vault-0 -n vault -o jsonpath='{.status.phase}' || echo "Pending")
+                            if [ "$STATUS" != "Running" ]; then
+                                echo "Vault pod not Ready yet ❌"
+                                sleep 10
+                                exit 1
+                            fi
+                            echo "Vault pod Running ✅"
+                            '''
+                        }
+                    }
+                }
             }
         }
 
         stage('Initialize Vault (HA)') {
             steps {
-                script {
-                    def status = sh(
-                        script: "kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- vault status -format=json | jq -r .initialized || echo false",
-                        returnStdout: true
-                    ).trim()
-
-                    if (status == "false") {
-                        sh """
-                        kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- \
-                          vault operator init -key-shares=3 -key-threshold=2 \
-                          -format=json > vault_init.json
-                        """
-                        echo "==> Vault initialized successfully ✅"
-                    } else {
-                        echo "==> Vault already initialized, skipping ✅"
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        retry(3) {
+                            sh '''
+                            INIT=$(kubectl exec -n vault vault-0 -- vault status -format=json | jq -r .initialized || echo false)
+                            if [ "$INIT" = "true" ]; then
+                                echo "Vault already initialized ✅"
+                                exit 0
+                            fi
+                            kubectl exec -n vault vault-0 -- \
+                              vault operator init -key-shares=3 -key-threshold=2 \
+                              -format=json > vault_init.json
+                            echo "Vault initialized ✅"
+                            '''
+                        }
                     }
                 }
             }
@@ -173,22 +176,25 @@ pipeline {
 
         stage('Unseal Vault (HA)') {
             steps {
-                script {
-                    def sealed = sh(
-                        script: "kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- vault status -format=json | jq -r .sealed",
-                        returnStdout: true
-                    ).trim()
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        def sealed = sh(
+                            script: "kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- vault status -format=json | jq -r .sealed",
+                            returnStdout: true
+                        ).trim()
 
-                    if (sealed == "false") {
-                        echo "==> Vault already unsealed, skipping ✅"
-                    } else {
-                        sh '''
-                        KEYS=$(jq -r '.unseal_keys_b64[0:2][]' vault_init.json)
-                        for key in $KEYS; do
-                          kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault operator unseal $key
-                        done
-                        echo "==> Vault unsealed successfully ✅"
-                        '''
+                        if (sealed == "false") {
+                            echo "==> Vault already unsealed, skipping ✅"
+                        } else {
+                            sh '''
+                            KEYS=$(jq -r '.unseal_keys_b64[0:2][]' vault_init.json)
+                            for key in $KEYS; do
+                              kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault operator unseal $key
+                            done
+                            echo "==> Vault unsealed successfully ✅"
+                            '''
+                        }
                     }
                 }
             }
@@ -196,21 +202,26 @@ pipeline {
 
         stage('Login Root Token') {
             steps {
-                script {
-                    // If you already have VAULT_TOKEN in the pod env or mounted, you can skip this; we keep idempotent approach
-                    def loggedIn = sh(
-                        script: "kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault token lookup -format=json | jq -r .data.id || echo ''",
-                        returnStdout: true
-                    ).trim()
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        def loggedIn = sh(
+                            script: "kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault token lookup -format=json | jq -r .data.id || echo ''",
+                            returnStdout: true
+                        ).trim()
 
-                    if (loggedIn) {
-                        echo "==> Already logged in with root token inside vault-0, skipping ✅"
-                    } else {
-                        sh '''
-                        ROOT_TOKEN=$(jq -r .root_token vault_init.json)
-                        kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault login $ROOT_TOKEN || true
-                        echo "==> Logged in with root token successfully ✅"
-                        '''
+                        if (loggedIn?.trim()) {
+                            echo "==> Already logged in with root token inside vault-0, skipping ✅"
+                        } else {
+                            sh '''
+                            ROOT_TOKEN=$(jq -r .root_token vault_init.json)
+                            if kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault login $ROOT_TOKEN; then
+                              echo "==> Logged in with root token successfully ✅"
+                            else
+                              echo "Login failed but ignoring (idempotent) ⚠️"
+                            fi
+                            '''
+                        }
                     }
                 }
             }
@@ -218,71 +229,93 @@ pipeline {
 
         stage('Enable KV Secret Engine') {
             steps {
-                script {
-                    def exists = sh(
-                        script: "kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault secrets list -format=json | jq -r 'has(\"secret/\")'",
-                        returnStdout: true
-                    ).trim()
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        def exists = sh(
+                            script: "kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault secrets list -format=json | jq -r 'has(\"secret/\")'",
+                            returnStdout: true
+                        ).trim()
 
-                    if (exists == "true") {
-                        echo "==> KV secrets engine already enabled, skipping ✅"
-                    } else {
-                        sh '''
-                        kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault secrets enable -path=secret kv-v2
-                        echo "==> KV secrets engine enabled successfully ✅"
-                        '''
+                        if (exists == "true") {
+                            echo "==> KV secrets engine already enabled, skipping ✅"
+                        } else {
+                            sh '''
+                            kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault secrets enable -path=secret kv-v2
+                            echo "==> KV secrets engine enabled successfully ✅"
+                            '''
+                        }
                     }
                 }
             }
         }
 
-        stage('Configure Kubernetes Auth in Vault') {
+        stage('Config K8s Auth Vault') {
             steps {
-                sh '''
-                echo "==> Configuring Kubernetes Auth in Vault"
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        retry(3) {
+                            sh '''
+                            echo "==> Configuring Kubernetes Auth in Vault"
 
-                # Ensure reviewer ServiceAccount exists (used by Vault to review tokens)
-                kubectl create sa ${VAULT_REVIEWER_SA} -n ${VAULT_NAMESPACE} || true
+                            if kubectl get sa ${VAULT_REVIEWER_SA} -n ${VAULT_NAMESPACE} >/dev/null 2>&1; then
+                              echo "ServiceAccount ${VAULT_REVIEWER_SA} already exists ✅"
+                            else
+                              kubectl create sa ${VAULT_REVIEWER_SA} -n ${VAULT_NAMESPACE}
+                              echo "ServiceAccount ${VAULT_REVIEWER_SA} created ✅"
+                            fi
 
-                # Grant system:auth-delegator to the reviewer SA so Vault can call TokenReview API
-                kubectl create clusterrolebinding ${VAULT_REVIEWER_SA}-auth-delegator \
-                  --clusterrole=system:auth-delegator \
-                  --serviceaccount=${VAULT_NAMESPACE}:${VAULT_REVIEWER_SA} || true
+                            if kubectl get clusterrolebinding ${VAULT_REVIEWER_SA}-auth-delegator >/dev/null 2>&1; then
+                              echo "ClusterRoleBinding already exists ✅"
+                            else
+                              kubectl create clusterrolebinding ${VAULT_REVIEWER_SA}-auth-delegator \
+                                --clusterrole=system:auth-delegator \
+                                --serviceaccount=${VAULT_NAMESPACE}:${VAULT_REVIEWER_SA}
+                              echo "ClusterRoleBinding created ✅"
+                            fi
 
-                # Ensure an app ServiceAccount exists (for the application pod)
-                kubectl create sa ${APP_SA_NAME} -n ${VAULT_NAMESPACE} || true
+                            if kubectl get sa ${APP_SA_NAME} -n ${VAULT_NAMESPACE} >/dev/null 2>&1; then
+                              echo "ServiceAccount ${APP_SA_NAME} already exists ✅"
+                            else
+                              kubectl create sa ${APP_SA_NAME} -n ${VAULT_NAMESPACE}
+                              echo "ServiceAccount ${APP_SA_NAME} created ✅"
+                            fi
 
-                # Enable Kubernetes auth in Vault (ignore error if already enabled)
-                kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault auth enable kubernetes || true
+                            if kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault auth enable kubernetes; then
+                              echo "Kubernetes auth enabled ✅"
+                            else
+                              echo "Kubernetes auth already enabled, skipping ✅"
+                            fi
 
-                # Retrieve tokens and CA (locally)
-                SA_JWT=$(kubectl create token ${VAULT_REVIEWER_SA} -n ${VAULT_NAMESPACE})
-                KUBE_CA=$(kubectl get configmap -n kube-system kube-root-ca.crt -o jsonpath="{.data['ca\\.crt']}")
+                            SA_JWT=$(kubectl create token ${VAULT_REVIEWER_SA} -n ${VAULT_NAMESPACE})
+                            KUBE_CA=$(kubectl get configmap -n kube-system kube-root-ca.crt -o jsonpath="{.data['ca\\.crt']}")
+                            KUBE_CA_B64=$(echo "${KUBE_CA}" | base64 | tr -d '\n')
+                            KUBE_HOST="https://kubernetes.default.svc:443"
 
-                # base64 encode the CA to safely transfer into the pod (avoids newline issues)
-                KUBE_CA_B64=$(echo "${KUBE_CA}" | base64 | tr -d '\n')
+                            kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/sh -c "echo ${KUBE_CA_B64} | base64 -d > /tmp/ca.crt && \
+                                /bin/vault write auth/kubernetes/config \
+                                  token_reviewer_jwt='${SA_JWT}' \
+                                  kubernetes_host='${KUBE_HOST}' \
+                                  kubernetes_ca_cert=@/tmp/ca.crt \
+                                  issuer='https://kubernetes.default.svc.cluster.local' || true"
 
-                # Kubernetes API server inside cluster
-                KUBE_HOST="https://kubernetes.default.svc:443"
-
-                # Put the CA into a file inside the vault-0 pod and configure kubernetes auth
-                kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/sh -c "echo ${KUBE_CA_B64} | base64 -d > /tmp/ca.crt && \
-                    /bin/vault write auth/kubernetes/config \
-                      token_reviewer_jwt='${SA_JWT}' \
-                      kubernetes_host='${KUBE_HOST}' \
-                      kubernetes_ca_cert=@/tmp/ca.crt \
-                      issuer='https://kubernetes.default.svc.cluster.local' || true"
-
-                echo "==> Kubernetes auth configured in Vault ✅"
-                '''
+                            echo "==> Kubernetes auth configured in Vault ✅"
+                            '''
+                        }
+                    }
+                }
             }
         }
 
         stage('Create Vault Policy') {
             steps {
-                sh '''
-                echo "==> Creating Vault policy: ${POLICY_NAME}"
-                cat <<EOF | kubectl exec -i -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault policy write ${POLICY_NAME} -
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        sh '''
+                        echo "==> Creating Vault policy: ${POLICY_NAME}"
+                        cat <<EOF | kubectl exec -i -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault policy write ${POLICY_NAME} -
 path "secret/data/myapp/*" {
   capabilities = ["read"]
 }
@@ -291,52 +324,61 @@ path "secret/metadata/myapp/*" {
   capabilities = ["read"]
 }
 EOF
-                '''
+                        '''
+                    }
+                }
             }
         }
 
         stage('Create Vault Role') {
             steps {
-                sh '''
-                echo "==> Creating Vault role for ServiceAccount ${APP_SA_NAME} and attaching policy ${POLICY_NAME}"
-                # Include audience to match typical K8s service account issuer to avoid aud mismatch
-                kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault write auth/kubernetes/role/${POLICY_NAME} \
-                  bound_service_account_names=${APP_SA_NAME} \
-                  bound_service_account_namespaces=${VAULT_NAMESPACE} \
-                  policies=${POLICY_NAME} \
-                  ttl=24h \
-                  audience="https://kubernetes.default.svc.cluster.local"
-                '''
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        sh '''
+                        echo "==> Creating Vault role for ServiceAccount ${APP_SA_NAME} and attaching policy ${POLICY_NAME}"
+                        kubectl exec -n ${VAULT_NAMESPACE} vault-0 -- /bin/vault write auth/kubernetes/role/${POLICY_NAME} \
+                              bound_service_account_names=${APP_SA_NAME} \
+                              bound_service_account_namespaces=${VAULT_NAMESPACE} \
+                              policies=${POLICY_NAME} \
+                              ttl=24h \
+                              audience="https://kubernetes.default.svc.cluster.local"
+                        '''
+                    }
+                }
             }
         }
+
         stage('Write Vault Secret') {
             steps {
-                sh '''
-                echo "==> Writing secret into Vault from file"
-        
-                if [ -f /var/lib/jenkins/workspace/pip/db.json ]; then
-                  echo "==> Found db.json, uploading directly into Vault"
-                  kubectl exec -i -n ${VAULT_NAMESPACE} vault-0 -- \
-                    vault kv put secret/myapp/db - < /var/lib/jenkins/workspace/pip/db.json
-        
-                  echo "==> Secret written successfully ✅"
-                else
-                  echo "⚠️  No db.json file found, skipping secret upload"
-                fi
-                '''
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        sh '''
+                        if [ -f /var/lib/jenkins/workspace/pip/db.json ]; then
+                            echo "==> Found db.json, uploading directly into Vault"
+                            kubectl exec -i -n ${VAULT_NAMESPACE} vault-0 -- \
+                                vault kv put secret/myapp/db - < /var/lib/jenkins/workspace/pip/db.json
+                            echo "==> Secret written successfully ✅"
+                        else
+                            echo "db.json missing ❌"
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
             }
         }
-
-
-       
-
-
 
         stage('Deploy App Pod') {
             steps {
-                sh '''
-                echo "==> Deploying Pod with Vault Agent Injector to fetch secret (pod runs in ${VAULT_NAMESPACE})"
-                kubectl apply -f - <<EOF
+                script {
+                    currentStage = env.STAGE_NAME
+                    try {
+                        sh """
+                        echo "==> Deploying Pod with Vault Agent Injector to fetch secret (pod runs in ${VAULT_NAMESPACE})"
+
+                        kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -346,9 +388,7 @@ metadata:
     app: myapp
   annotations:
     vault.hashicorp.com/agent-inject: "true"
-    # Vault role must match the Vault role we created (POLICY_NAME)
     vault.hashicorp.com/role: ${POLICY_NAME}
-    # For a KV v2 mount use the "data" path
     vault.hashicorp.com/agent-inject-secret-db.txt: "secret/data/myapp/db"
 spec:
   serviceAccountName: ${APP_SA_NAME}
@@ -358,56 +398,95 @@ spec:
     command: ["/bin/sh"]
     args: ["-c", "sleep 3600"]
 EOF
-                '''
-            }
-        }
 
-        stage('Verify Vault Secret Injection') {
-            steps {
-                script {
-                    echo "==> Waiting for pod 'myapp' init containers to finish..."
-                    sh '''
-                    for i in {1..30}; do
-                      INIT_READY=$(kubectl get pod myapp -n ${VAULT_NAMESPACE} -o jsonpath='{.status.initContainerStatuses[*].ready}' 2>/dev/null || echo "false")
-                      if [ "$INIT_READY" = "true" ]; then
-                        echo "==> Init containers finished ✅"
-                        break
-                      fi
-                      echo "==> Init containers not ready yet, retrying in 10s..."
-                      sleep 10
-                    done
-                    '''
-
-                    echo "==> Waiting for main containers to be Ready..."
-                    sh '''
-                    for i in {1..30}; do
-                      STATUS=$(kubectl get pod myapp -n ${VAULT_NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
-                      READY=$(kubectl get pod myapp -n ${VAULT_NAMESPACE} -o jsonpath='{.status.containerStatuses[*].ready}' 2>/dev/null || echo "false")
-                      if [ "$STATUS" = "Running" ] && echo "$READY" | grep -q "true"; then
-                        echo "==> Pod is Running and Ready ✅"
-                        break
-                      fi
-                      echo "==> Pod not ready yet (STATUS=$STATUS, READY=$READY), retrying in 10s..."
-                      sleep 10
-                    done
-                    '''
-
-                    echo "==> Getting container names inside myapp pod..."
-                    def containers = sh(
-                        script: "kubectl get pod myapp -n ${VAULT_NAMESPACE} -o jsonpath='{.spec.containers[*].name}'",
-                        returnStdout: true
-                    ).trim()
-                    echo "Containers found: ${containers}"
-
-                    containers.split(" ").each { c ->
-                        echo "==> Checking container: ${c}"
-                        sh """
-                        kubectl exec -n ${VAULT_NAMESPACE} myapp -c ${c} -- sh -c 'ls -l /vault/secrets/ || true'
+                        echo "✅ App pod deployed successfully"
                         """
+                    } catch (err) {
+                        echo "❌ Failed to deploy app pod"
+                        def logSnippet = sh(
+                            script: 'kubectl describe pod myapp -n ${VAULT_NAMESPACE}',
+                            returnStdout: true
+                        ).trim()
+                        slackSend(
+                            channel: '#jenkins-alerts',
+                            color: 'danger',
+                            message: "*Stage: Deploy App Pod FAILED*\nError: ${err}\nLogs:\n``` ${logSnippet.take(1000)} ```"
+                        )
+                        error("Stage failed: Deploy App Pod")
                     }
                 }
             }
         }
 
-    } // stages
-} // pipeline
+        stage('Verify Secret Injection') {
+            steps {
+                ansiColor('xterm') {
+                    script {
+                        currentStage = env.STAGE_NAME
+                        retry(3) {
+                            script {
+                                echo "==> Waiting for pod 'myapp' init containers to finish..."
+                                sh '''
+                                for i in {1..30}; do
+                                  INIT_READY=$(kubectl get pod myapp -n ${VAULT_NAMESPACE} -o jsonpath='{.status.initContainerStatuses[*].ready}' 2>/dev/null || echo "false")
+                                  if [ "$INIT_READY" = "true" ]; then
+                                    echo "==> Init containers finished ✅"
+                                    break
+                                  fi
+                                  echo "==> Init containers not ready yet, retrying in 10s..."
+                                  sleep 10
+                                done
+                                '''
+
+                                echo "==> Waiting for main containers to be Ready..."
+                                sh '''
+                                for i in {1..30}; do
+                                  STATUS=$(kubectl get pod myapp -n ${VAULT_NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
+                                  READY=$(kubectl get pod myapp -n ${VAULT_NAMESPACE} -o jsonpath='{.status.containerStatuses[*].ready}' 2>/dev/null || echo "false")
+                                  if [ "$STATUS" = "Running" ] && echo "$READY" | grep -q "true"; then
+                                    echo "==> Pod is Running and Ready ✅"
+                                    break
+                                  fi
+                                  echo "==> Pod not ready yet (STATUS=$STATUS, READY=$READY), retrying in 10s..."
+                                  sleep 10
+                                done
+                                '''
+
+                                echo "==> Getting container names inside myapp pod..."
+                                def containers = sh(
+                                    script: "kubectl get pod myapp -n ${VAULT_NAMESPACE} -o jsonpath='{.spec.containers[*].name}'",
+                                    returnStdout: true
+                                ).trim()
+                                echo "Containers found: ${containers}"
+
+                                containers.split(" ").each { c ->
+                                    echo "==> Checking container: ${c}"
+                                    sh """
+                                    kubectl exec -n ${VAULT_NAMESPACE} myapp -c ${c} -- sh -c 'ls -l /vault/secrets/ '
+                                    """
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            slackSend(channel: 'vault-centralized-resources',
+                      color: 'good',
+                      message: "✅ Pipeline finished successfully: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
+        }
+        failure {
+            slackSend(channel: 'vault-centralized-resources',
+                      color: 'danger',
+                      message: "❌ Pipeline failed in stage: *${currentStage}* (Job: ${env.JOB_NAME} #${env.BUILD_NUMBER})")
+        }
+        always {
+            echo "ℹ️ Pipeline completed (success or failure)."
+        }
+    }
+}
+
