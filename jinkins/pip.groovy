@@ -1,7 +1,9 @@
+def currentStage = ""
 pipeline {
-    agent any
+   agent { label 'vault' }
 
     environment {
+        PATH = "/root/bin:${env.PATH}"
         KUBECONFIG        = "${HOME}/.kube/config"
         CLUSTER_NAME      = "ci-test"
         VAULT_NAMESPACE   = "vault"
@@ -15,76 +17,94 @@ pipeline {
     }
 
     stages {
+        
         stage('Check & Install Required Tools') {
             steps {
                 ansiColor('xterm') {
                     script {
                         currentStage = env.STAGE_NAME
                         sh '''
-                        set -e
+                         set -e
 
                         check_install() {
-                          TOOL=$1
-                          INSTALL_CMD=$2
-                          if ! command -v "$TOOL" >/dev/null 2>&1; then
-                            echo "==> $TOOL not found ❌ Installing..."
-                            eval "$INSTALL_CMD"
-                            if command -v "$TOOL" >/dev/null 2>&1; then
-                              echo "==> $TOOL installed successfully ✅"
+                            TOOL=$1
+                            INSTALL_CMD=$2
+                            if ! command -v "$TOOL" >/dev/null 2>&1; then
+                                echo "==> $TOOL not found ❌ Installing..."
+                                eval "$INSTALL_CMD"
+                                if command -v "$TOOL" >/dev/null 2>&1; then
+                                    echo "==> $TOOL installed successfully ✅"
+                                else
+                                    echo "==> Failed to install $TOOL ❌"
+                                    exit 1
+                                fi
                             else
-                              echo "==> Failed to install $TOOL ❌"
-                              exit 1
+                                echo "==> $TOOL already installed ✅"
                             fi
-                          else
-                            echo "==> $TOOL already installed ✅"
-                          fi
                         }
-
-                        # Install tools if missing
-                        check_install kind "curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind"
-                        check_install kubectl "curl -LO https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl && chmod +x kubectl && sudo mv kubectl /usr/local/bin/"
+        
+                        mkdir -p $HOME/bin
+        
+                        check_install kind "curl -Lo $HOME/bin/kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64 && chmod +x $HOME/bin/kind"
+                        check_install kubectl "curl -sSL -o $HOME/bin/kubectl https://dl.k8s.io/release/$(curl -sSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl && chmod +x $HOME/bin/kubectl"
                         check_install helm "curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
-                        check_install jq "sudo apt-get update && sudo apt-get install -y jq || sudo yum install -y jq"
-                        check_install curl "sudo apt-get update && sudo apt-get install -y curl || sudo yum install -y curl"
-                        check_install base64 "sudo apt-get update && sudo apt-get install -y coreutils || sudo yum install -y coreutils"
+                        check_install jq "apt-get update && apt-get install -y jq || yum install -y jq"
+                        check_install curl "apt-get update && apt-get install -y curl || yum install -y curl"
+                        check_install base64 "apt-get update && apt-get install -y coreutils || yum install -y coreutils"
                         '''
                     }
                 }
             }
         }
-
+        
+        
         stage('Create KinD Cluster') {
             steps {
                 ansiColor('xterm') {
                     script {
                         currentStage = env.STAGE_NAME
+        
                         def exists = sh(
                             script: "kind get clusters | grep -q \"^${CLUSTER_NAME}\$\" && echo true || echo false",
                             returnStdout: true
                         ).trim()
-
+        
                         if (exists == "true") {
                             echo "==> Cluster ${CLUSTER_NAME} already exists, skipping ✅"
                         } else {
+                            echo "==> Creating KinD cluster ${CLUSTER_NAME} 🕹️"
+        
                             sh """
-                            kind create cluster --name ${CLUSTER_NAME} --wait 120s
-                            mkdir -p ~/.kube
-                            kind get kubeconfig --name ${CLUSTER_NAME} > ~/.kube/config
-                            chmod 600 ~/.kube/config
+                            set -eux
+                            kind delete cluster --name ${CLUSTER_NAME} || true
+        
+                            # Create KinD cluster
+                            kind create cluster --name ${CLUSTER_NAME} --wait 180s
+        
+                            mkdir -p ${WORKSPACE}/.kube
+                            kind get kubeconfig --name ${CLUSTER_NAME} > ${WORKSPACE}/.kube/config
+                            chmod 600 ${WORKSPACE}/.kube/config
+        
+                            # Verify cluster is responsive
+                            KUBECONFIG=${WORKSPACE}/.kube/config kubectl get nodes -o wide
                             """
-                            echo "==> Cluster ${CLUSTER_NAME} created successfully ✅"
+        
+                            // Update Jenkins environment so all next stages see correct cluster
+                            env.KUBECONFIG = "${WORKSPACE}/.kube/config"
+                            echo "==> Cluster ${CLUSTER_NAME} created and kubeconfig exported ✅"
                         }
                     }
                 }
             }
         }
+
 
         stage('Check Cluster Nodes') {
             steps {
                 ansiColor('xterm') {
                     script {
                         currentStage = env.STAGE_NAME
-                        retry(10) {
+                        retry(40) {
                             sh '''
                             echo "==> Checking nodes..."
                             NOT_READY=$(kubectl get nodes --no-headers | awk '$2 != "Ready" {print $1}')
@@ -320,9 +340,7 @@ path "secret/data/myapp/*" {
   capabilities = ["read"]
 }
 
-path "secret/metadata/myapp/*" {
-  capabilities = ["read"]
-}
+
 EOF
                         '''
                     }
@@ -355,10 +373,11 @@ EOF
                     script {
                         currentStage = env.STAGE_NAME
                         sh '''
-                        if [ -f /var/lib/jenkins/workspace/pip/db.json ]; then
-                            echo "==> Found db.json, uploading directly into Vault"
+
+                         if [ -f /db.json  ]; then
+                          echo "==> Found db.json, uploading directly into Vault"
                             kubectl exec -i -n ${VAULT_NAMESPACE} vault-0 -- \
-                                vault kv put secret/myapp/db - < /var/lib/jenkins/workspace/pip/db.json
+                                vault kv put secret/myapp/db - < /db.json  
                             echo "==> Secret written successfully ✅"
                         else
                             echo "db.json missing ❌"
