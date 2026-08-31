@@ -1,0 +1,19 @@
+services:
+
+  app:
+    build: .
+    container_name: users-app
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:16
+    container_name: users-db
+    environment:
+      POSTGRES_DB: usersdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: app_password
+    ports:
+      - "5432:5432"
