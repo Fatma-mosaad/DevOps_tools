@@ -2,6 +2,41 @@ pipeline {
     agent any
 
     stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    credentialsId: 'github',
+                    url: 'https://github.com/Fatma-mosaad/DevOps_tools.git'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                    docker build -t users-app:${BUILD_NUMBER} jinkins/user-app
+                '''
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                sh '''
+                    docker run --rm \
+                      -v /var/run/docker.sock:/var/run/docker.sock \
+                      aquasec/trivy:latest \
+                      image \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 1 \
+                      users-app:${BUILD_NUMBER}
+                '''
+            }
+        }
+    }
+}pipeline {
+    agent any
+
+    stages {
         stage('Checkout') {
             steps {
                 checkout scm
