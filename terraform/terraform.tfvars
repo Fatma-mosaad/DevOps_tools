@@ -1,5 +1,0 @@
-aws_region    = "us-east-1"
-ami_id        = "ami-081b0a6eac00b4f53"
-instance_type = "t3.micro"
-key_name      = "pip-key"
-ssh_cidr      = "162.220.55.10/32"
