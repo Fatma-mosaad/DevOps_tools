@@ -14,7 +14,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    docker build -t users-app:${BUILD_NUMBER} jinkins/user-app
+                    docker build -t users-app:v1.0.0 jinkins/user-app
                 '''
             }
         }
@@ -32,14 +32,30 @@ pipeline {
                 '''
             }
         }
-    }
-}pipeline {
-    agent any
 
-    stages {
-        stage('Checkout') {
+        stage('Push to Docker Hub') {
             steps {
-                checkout scm
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'docker-hub',
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        echo "$DOCKERHUB_TOKEN" | docker login \
+                            -u "$DOCKERHUB_USERNAME" \
+                            --password-stdin
+
+                        docker tag users-app:${BUILD_NUMBER} \
+                            $DOCKERHUB_USERNAME/users-app:${BUILD_NUMBER}
+
+                        docker push \
+                            $DOCKERHUB_USERNAME/users-app:${BUILD_NUMBER}
+
+                        docker logout
+                    '''
+                }
             }
         }
     }
