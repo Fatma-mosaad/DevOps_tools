@@ -19,6 +19,18 @@ resource "aws_instance" "users_app" {
 
   vpc_security_group_ids = [aws_security_group.users_app.id]
 
+  user_data = <<-EOF
+              #!/bin/bash
+
+              apt-get update -y
+              apt-get install -y docker.io
+
+              systemctl enable docker
+              systemctl start docker
+
+              usermod -aG docker ubuntu
+              EOF
+
   tags = {
     Name = "users-app-server"
   }
