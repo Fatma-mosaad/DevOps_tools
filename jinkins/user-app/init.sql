@@ -7,5 +7,5 @@ CREATE TABLE IF NOT EXISTS users (
 INSERT INTO users (name, email)
 VALUES
     ('Fatma', 'fatma@example.com'),
-    ('Ahmed', 'ahmed@example.com')
+    ('Elias', 'elias@example.com')
 ON CONFLICT (email) DO NOTHING;
