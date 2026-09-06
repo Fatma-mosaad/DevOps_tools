@@ -22,13 +22,13 @@ resource "aws_instance" "users_app" {
   user_data = <<-EOF
               #!/bin/bash
 
-              apt-get update -y
-              apt-get install -y docker.io
+              dnf update -y
+              dnf install -y docker
 
               systemctl enable docker
               systemctl start docker
 
-              usermod -aG docker ubuntu
+              usermod -aG docker ec2-user
               EOF
 
   tags = {
