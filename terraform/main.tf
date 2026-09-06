@@ -20,16 +20,24 @@ resource "aws_instance" "users_app" {
   vpc_security_group_ids = [aws_security_group.users_app.id]
 
   user_data = <<-EOF
-              #!/bin/bash
+            #!/bin/bash
 
-              dnf update -y
-              dnf install -y docker
+            dnf update -y
+            dnf install -y docker
 
-              systemctl enable docker
-              systemctl start docker
+            systemctl enable docker
+            systemctl start docker
 
-              usermod -aG docker ec2-user
-              EOF
+            usermod -aG docker ec2-user
+
+            mkdir -p /usr/local/lib/docker/cli-plugins
+
+            curl -SL \
+              https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+              -o /usr/local/lib/docker/cli-plugins/docker-compose
+
+            chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+            EOF
 
   tags = {
     Name = "users-app-server"
