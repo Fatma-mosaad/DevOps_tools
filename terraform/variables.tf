@@ -20,6 +20,6 @@ variable "key_name" {
 }
 
 variable "ssh_cidr" {
-  type        = string
+  type        = list(string)
   description = "CIDR allowed to access SSH"
 }
