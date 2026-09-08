@@ -21,6 +21,7 @@ resource "aws_instance" "users_app" {
 
   user_data = <<-EOF
             #!/bin/bash
+            set -e
 
             # Log all bootstrap output
             exec > >(tee /var/log/users-app-bootstrap.log | logger -t users-app-bootstrap -s 2>/dev/console) 2>&1
@@ -33,9 +34,13 @@ resource "aws_instance" "users_app" {
             echo "Updating system packages..."
             dnf update -y
 
-            # Install required packages
-            echo "Installing Docker and required tools..."
-            dnf install -y docker curl
+            # Install Docker
+            # NOTE: don't install "curl" here — Amazon Linux 2023 already ships
+            # "curl-minimal" which conflicts with the full "curl" package and
+            # causes the whole dnf install to fail (including docker).
+            # curl-minimal already provides everything this script needs.
+            echo "Installing Docker..."
+            dnf install -y docker
 
             # Enable and start Docker
             echo "Enabling Docker service..."
@@ -44,17 +49,24 @@ resource "aws_instance" "users_app" {
             echo "Starting Docker service..."
             systemctl start docker
 
-            # Wait for Docker to become ready
+            # Wait for Docker to become ready, and fail loudly if it never does
             echo "Waiting for Docker..."
+            DOCKER_READY=0
             for i in {1..30}; do
               if systemctl is-active --quiet docker; then
                 echo "Docker service is running."
+                DOCKER_READY=1
                 break
               fi
 
               echo "Docker is not ready yet. Attempt $i/30..."
               sleep 2
             done
+
+            if [ "$DOCKER_READY" != "1" ]; then
+              echo "ERROR: Docker service never became active. Aborting bootstrap."
+              exit 1
+            fi
 
             # Add ec2-user to docker group
             echo "Adding ec2-user to docker group..."
