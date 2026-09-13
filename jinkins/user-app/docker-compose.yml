@@ -1,5 +1,4 @@
 services:
-
   app:
     image: ${APP_IMAGE}
     container_name: users-app
@@ -7,15 +6,15 @@ services:
       - "5000:5000"
     depends_on:
       - postgres
+    env_file:
+      - .env
     restart: unless-stopped
 
   postgres:
     image: postgres:16
     container_name: postgres
-    environment:
-      POSTGRES_DB: usersdb
-      POSTGRES_USER: appuser
-      POSTGRES_PASSWORD: app_password
+    env_file:
+      - .env
     volumes:
       - users-db-data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
