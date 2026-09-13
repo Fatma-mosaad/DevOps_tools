@@ -13,26 +13,9 @@ provider "aws" {
   region = var.aws_region
 }
 
-<<<<<<< HEAD:terraform/main.tf
 # ============================================================
 # Security Group
 # ============================================================
-=======
-resource "aws_instance" "users_app" {
-  ami           = var.ami_id
-  instance_type = var.instance_type
-
-  key_name = var.key_name
-
-  vpc_security_group_ids = [aws_security_group.users_app.id]
-
- 
-
-  tags = {
-    Name = "users-app-server"
-  }
-}
->>>>>>> daa6fc38 ( add ansible playbook):jinkins/terraform/main.tf
 
 resource "aws_security_group" "users_app" {
   name        = "users-app-sg"
@@ -43,10 +26,7 @@ resource "aws_security_group" "users_app" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-<<<<<<< HEAD:terraform/main.tf
 
-=======
->>>>>>> daa6fc38 ( add ansible playbook):jinkins/terraform/main.tf
     cidr_blocks = var.ssh_cidr
   }
 
@@ -67,7 +47,6 @@ resource "aws_security_group" "users_app" {
 
     cidr_blocks = ["0.0.0.0/0"]
   }
-<<<<<<< HEAD:terraform/main.tf
 
   tags = {
     Name = "users-app-sg"
@@ -90,6 +69,4 @@ resource "aws_instance" "users_app" {
   tags = {
     Name = "users-app-server"
   }
-=======
->>>>>>> daa6fc38 ( add ansible playbook):jinkins/terraform/main.tf
 }
