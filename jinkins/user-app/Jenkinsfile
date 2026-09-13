@@ -1,6 +1,415 @@
 pipeline {
     agent any
 
+    triggers {
+        // Fallback to polling since no public IP is available for a GitHub webhook yet
+        pollSCM('H * * * *')
+    }
+
+    environment {
+        DEPLOYMENT_STARTED = 'false'
+        APP_NAME            = 'users-app'
+        DB_NAME             = 'usersdb'
+        DB_HOST             = 'postgres'
+        DB_PORT             = '5432'
+    }
+
+    // No parameters - fully automatic, tag is always BUILD_NUMBER
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    credentialsId: 'github',
+                    url: 'https://github.com/Fatma-mosaad/DevOps_tools.git'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                    docker build -t ${APP_NAME}:${BUILD_NUMBER} jinkins/user-app
+                '''
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                sh '''
+                    docker run --rm \
+                      -v /var/run/docker.sock:/var/run/docker.sock \
+                      aquasec/trivy:latest \
+                      image \
+                      --severity CRITICAL \
+                      --exit-code 1 \
+                      ${APP_NAME}:${BUILD_NUMBER}
+
+                    docker run --rm \
+                      -v /var/run/docker.sock:/var/run/docker.sock \
+                      aquasec/trivy:latest \
+                      image \
+                      --severity HIGH,MEDIUM,LOW \
+                      --exit-code 0 \
+                      ${APP_NAME}:${BUILD_NUMBER}
+                '''
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'docker-hub',
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        echo "$DOCKERHUB_TOKEN" | docker login \
+                            -u "$DOCKERHUB_USERNAME" \
+                            --password-stdin
+
+                        docker tag ${APP_NAME}:${BUILD_NUMBER} \
+                            $DOCKERHUB_USERNAME/${APP_NAME}:${BUILD_NUMBER}
+
+                        docker push \
+                            $DOCKERHUB_USERNAME/${APP_NAME}:${BUILD_NUMBER}
+
+                        docker logout
+                    '''
+                }
+            }
+        }
+
+        stage('Prepare Terraform Variables') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'terraform-cerd',
+                        variable: 'TFVARS_FILE'
+                    )
+                ]) {
+                    sh '''
+                        rm -f terraform/terraform.tfvars
+                        cp "$TFVARS_FILE" terraform/terraform.tfvars
+                        chmod 600 terraform/terraform.tfvars
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Init/Plan/Apply') {
+            steps {
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-key']
+                ]) {
+                    // retry only helps with transient errors (AWS throttling).
+                    // Permanent errors (permissions, quota) will fail identically all 3 times.
+                    retry(3) {
+                        sh '''
+                            cd terraform
+                            terraform init
+                            terraform plan
+                            terraform apply -auto-approve
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Wait for SSH Ready') {
+            // Only waits for SSH - Docker readiness is Ansible's job now, not user_data
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'es2-ssh',
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    sh '''
+                        chmod 600 "$SSH_KEY"
+
+                        EC2_IP=$(cd terraform && terraform output -raw instance_public_ip)
+
+                        MAX_ATTEMPTS=15
+                        ATTEMPT=1
+                        READY=0
+
+                        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+                            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
+                            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+                                -i "$SSH_KEY" "$SSH_USER@$EC2_IP" "echo ok" 2>/dev/null; then
+                                echo "SSH is ready."
+                                READY=1
+                                break
+                            fi
+                            sleep 5
+                            ATTEMPT=$((ATTEMPT + 1))
+                        done
+
+                        if [ "$READY" != "1" ]; then
+                            echo "ERROR: SSH never became reachable."
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Ansible Provision') {
+            // Installs Docker + Docker Compose ONLY - nothing deployment-related.
+            // Idempotent - skips instantly if already installed.
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'es2-ssh',
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    sh '''
+                        chmod 600 "$SSH_KEY"
+
+                        EC2_IP=$(cd terraform && terraform output -raw instance_public_ip)
+
+                        sed -e "s|__EC2_IP__|$EC2_IP|" \
+                            -e "s|__SSH_USER__|$SSH_USER|" \
+                            -e "s|__SSH_KEY_PATH__|$SSH_KEY|" \
+                            ansible/inventory.ini.template > ansible/inventory.ini
+
+                        ansible-playbook -i ansible/inventory.ini ansible/site.yml
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                script {
+                    env.DEPLOYMENT_STARTED = 'true'
+                }
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'es2-ssh',
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    ),
+                    usernamePassword(
+                        credentialsId: 'docker-hub',
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    ),
+                    usernamePassword(
+                        credentialsId: 'users-app-db',
+                        usernameVariable: 'DB_USER',
+                        passwordVariable: 'DB_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        chmod 600 "$SSH_KEY"
+
+                        EC2_IP=$(cd terraform && terraform output -raw instance_public_ip)
+                        APP_IMAGE="$DOCKERHUB_USERNAME/$APP_NAME:$BUILD_NUMBER"
+
+                        echo "Deploying application to EC2: $EC2_IP"
+                        echo "Application image: $APP_IMAGE"
+
+                        ssh -o StrictHostKeyChecking=no \
+                            -i "$SSH_KEY" \
+                            "$SSH_USER@$EC2_IP" \
+                            "mkdir -p ~/$APP_NAME"
+
+                        echo "Copying docker-compose.yml (contains no secrets)..."
+
+                        scp -o StrictHostKeyChecking=no \
+                            -i "$SSH_KEY" \
+                            docker-compose.yml \
+                            "$SSH_USER@$EC2_IP:~/$APP_NAME/docker-compose.yml"
+
+                        echo "Copying init.sql..."
+
+                        scp -o StrictHostKeyChecking=no \
+                            -i "$SSH_KEY" \
+                            jinkins/user-app/init.sql \
+                            "$SSH_USER@$EC2_IP:~/$APP_NAME/init.sql"
+
+                        echo "Preparing .env..."
+
+                        ssh -o StrictHostKeyChecking=no \
+                            -i "$SSH_KEY" \
+                            "$SSH_USER@$EC2_IP" "
+                                if [ ! -f ~/$APP_NAME/.env ]; then
+                                    cat > ~/$APP_NAME/.env << ENVEOF
+APP_IMAGE=$APP_IMAGE
+POSTGRES_DB=$DB_NAME
+POSTGRES_USER=$DB_USER
+POSTGRES_PASSWORD=$DB_PASSWORD
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=$DB_NAME
+DB_USER=$DB_USER
+DB_PASSWORD=$DB_PASSWORD
+ENVEOF
+                                    chmod 600 ~/$APP_NAME/.env
+                                    echo 'Created .env for the first time.'
+                                else
+                                    sed -i \"s|^APP_IMAGE=.*|APP_IMAGE=$APP_IMAGE|\" ~/$APP_NAME/.env
+                                    echo '.env already existed - only updated APP_IMAGE.'
+                                fi
+                            "
+
+                        echo "Deploying with Docker Compose (app service only - DB untouched)..."
+
+                        ssh -o StrictHostKeyChecking=no \
+                            -i "$SSH_KEY" \
+                            "$SSH_USER@$EC2_IP" \
+                            "cd ~/$APP_NAME && \
+                            sudo docker compose pull app && \
+                            sudo docker compose up -d app && \
+                            sudo docker ps"
+                    '''
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'es2-ssh',
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    sh '''
+                        chmod 600 "$SSH_KEY"
+
+                        EC2_IP=$(cd terraform && terraform output -raw instance_public_ip)
+
+                        MAX_ATTEMPTS=5
+                        ATTEMPT=1
+                        HEALTHY=0
+
+                        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+                            echo "Health check attempt $ATTEMPT/$MAX_ATTEMPTS..."
+
+                            HEALTH_RESPONSE=$(ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$SSH_USER@$EC2_IP" "curl -s http://localhost:5000/health" || true)
+                            USERS_RESPONSE=$(ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$SSH_USER@$EC2_IP" "curl -s http://localhost:5000/users" || true)
+
+                            if echo "$HEALTH_RESPONSE" | grep -q '"status":"ok"' && \
+                               echo "$USERS_RESPONSE" | grep -q "Fatma" && \
+                               echo "$USERS_RESPONSE" | grep -q "Elias"; then
+                                echo "Application tests passed successfully."
+                                HEALTHY=1
+                                break
+                            fi
+
+                            echo "Not healthy yet, waiting 5s..."
+                            sleep 5
+                            ATTEMPT=$((ATTEMPT + 1))
+                        done
+
+                        if [ "$HEALTHY" != "1" ]; then
+                            echo "ERROR: Application failed health check after $MAX_ATTEMPTS attempts."
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Save Successful Deployment') {
+            steps {
+                sh '''
+                    echo "${BUILD_NUMBER}" > last_successful_tag.txt
+                    echo "Recording ${BUILD_NUMBER} as last known-good deployment"
+                    mkdir -p "${JENKINS_HOME}/users-app-state"
+                    cp last_successful_tag.txt "${JENKINS_HOME}/users-app-state/last_successful_tag.txt"
+                '''
+                archiveArtifacts artifacts: 'last_successful_tag.txt', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        failure {
+            script {
+                if (env.DEPLOYMENT_STARTED != 'true') {
+                    echo "Failure happened before deployment actually started - old app is still running. Stopping without rollback."
+                    return
+                }
+
+                def stateFile = "${env.JENKINS_HOME}/users-app-state/last_successful_tag.txt"
+
+                if (!fileExists(stateFile)) {
+    echo "No previous successful deployment recorded - cannot auto-rollback."
+                    return
+                }
+
+                def previousTag = readFile(stateFile).trim()
+
+                if (!previousTag || previousTag == env.BUILD_NUMBER) {
+    echo "No different previous version to roll back to (same tag that failed)."
+                    return
+                }
+
+echo "Pipeline failed on tag ${env.BUILD_NUMBER}. Rolling back to last known-good tag: ${previousTag}"
+
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'es2-ssh',
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    ),
+                    usernamePassword(
+                        credentialsId: 'docker-hub',
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh """
+                        chmod 600 "\$SSH_KEY"
+
+                        EC2_IP=\$(cd terraform && terraform output -raw instance_public_ip)
+                        ROLLBACK_IMAGE="\$DOCKERHUB_USERNAME/${env.APP_NAME}:${previousTag}"
+
+                        echo "Rolling back EC2 (\$EC2_IP) to \$ROLLBACK_IMAGE"
+
+                        # No need to re-copy docker-compose.yml or .env from scratch -
+                        # they already exist on the server from the last successful deploy.
+                        # Only the image line is updated and the app service restarted.
+                        ssh -o StrictHostKeyChecking=no \
+                            -i "\$SSH_KEY" \
+                            "\$SSH_USER@\$EC2_IP" "
+                                sed -i 's|^APP_IMAGE=.*|APP_IMAGE=\$ROLLBACK_IMAGE|' ~/${env.APP_NAME}/.env
+                                cd ~/${env.APP_NAME} && \
+                                sudo docker compose pull app && \
+                                sudo docker compose up -d app && \
+                                sudo docker ps
+                            "
+
+                        echo "Verifying rollback health..."
+
+                        ROLLBACK_HEALTH=\$(ssh -o StrictHostKeyChecking=no -i "\$SSH_KEY" "\$SSH_USER@\$EC2_IP" "curl -s http://localhost:5000/health")
+
+                        echo "Rollback health response: \$ROLLBACK_HEALTH"
+
+                        if echo "\$ROLLBACK_HEALTH" | grep -q '"status":"ok"'; then
+                            echo "Rollback succeeded. EC2 is back on tag ${previousTag}."
+                        else
+                            echo "Rollback health check FAILED. Manual intervention required."
+                        fi
+                    """
+                }
+            }
+        }
+    }
+}pipeline {
+    agent any
+
     parameters {
         choice(
             name: 'ACTION',
