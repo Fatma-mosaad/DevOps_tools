@@ -5,6 +5,8 @@
 
   vars_files:
     - all.yml
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.9
 
   tasks:
     - name: Install Docker (works on any Linux distro)
