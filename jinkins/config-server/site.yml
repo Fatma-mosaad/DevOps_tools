@@ -3,6 +3,9 @@
   hosts: app_server
   become: true
 
+  vars_files:
+    - all.yml
+
   tasks:
     - name: Install Docker (works on any Linux distro)
       ansible.builtin.package:
