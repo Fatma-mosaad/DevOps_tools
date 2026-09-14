@@ -5,14 +5,16 @@
 
   vars_files:
     - all.yml
+
   vars:
     ansible_python_interpreter: /usr/bin/python3.9
 
   tasks:
-    - name: Install Docker (works on any Linux distro)
-      ansible.builtin.package:
+    - name: Install Docker
+      ansible.builtin.dnf:
         name: "{{ docker_package_map[ansible_facts['os_family']] }}"
         state: present
+        update_cache: true
 
     - name: Enable and start Docker service
       ansible.builtin.systemd:
@@ -30,13 +32,13 @@
       ansible.builtin.file:
         path: /usr/local/lib/docker/cli-plugins
         state: directory
-        mode: '0755'
+        mode: "0755"
 
-    - name: Install Docker Compose plugin (skipped if already present)
+    - name: Install Docker Compose plugin
       ansible.builtin.get_url:
         url: "{{ docker_compose_plugin_url }}"
         dest: /usr/local/lib/docker/cli-plugins/docker-compose
-        mode: '0755'
+        mode: "0755"
 
     - name: Verify Docker is actually working
       ansible.builtin.command: docker info
