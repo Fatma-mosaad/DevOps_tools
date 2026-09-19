@@ -18,6 +18,10 @@ def get_db_connection():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
+    
+@app.route("/version")
+def version():
+    return {"version": "v51"}
 
 
 @app.route("/users")
