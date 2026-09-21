@@ -15,9 +15,12 @@ def get_db_connection():
     )
 
 
+# @app.route("/health")
+# def health():
+#     return jsonify({"status": "ok"})
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "error"}), 500
     
 
 
