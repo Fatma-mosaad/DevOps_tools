@@ -14,9 +14,9 @@ def get_db_connection():
         port=int(os.getenv("DB_PORT", "5432"))
     )
 
-# @app.route("/health")
-# def health():
-#     return jsonify({"status": "ok", "version": "85"})
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "version": "85"})
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
